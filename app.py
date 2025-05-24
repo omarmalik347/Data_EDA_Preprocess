@@ -433,7 +433,7 @@ def train_ml_model(df, target):
     model_name = st.selectbox(
         f"Select {problem_type} model",
         list(model_options[problem_type].keys())
-    
+    )
     # Hyperparameter tuning
     st.markdown("### Hyperparameter Tuning (Optional)")
     if st.checkbox("Enable hyperparameter tuning", False):
