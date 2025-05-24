@@ -45,43 +45,96 @@ def load_data(uploaded_file):
         st.error(f"Error loading file: {e}")
         return None
 
+def show_data_issues(df):
+    """Display data quality issues to the user"""
+    st.subheader("Data Quality Report")
+    
+    # Missing values
+    missing_values = df.isnull().sum()
+    if missing_values.sum() > 0:
+        st.warning("🚨 Missing Values Detected")
+        st.write(missing_values[missing_values > 0])
+    else:
+        st.success("✅ No missing values found")
+    
+    # Duplicates
+    duplicates = df.duplicated().sum()
+    if duplicates > 0:
+        st.warning(f"🚨 Found {duplicates} duplicate rows")
+    else:
+        st.success("✅ No duplicate rows found")
+    
+    # Data types
+    st.subheader("Data Types")
+    st.write(df.dtypes)
+    
+    # Numeric stats
+    numeric_cols = df.select_dtypes(include=np.number).columns
+    if not numeric_cols.empty:
+        st.subheader("Numeric Columns Statistics")
+        st.write(df[numeric_cols].describe())
+    
+    # Categorical stats
+    cat_cols = df.select_dtypes(include=['object', 'category']).columns
+    if not cat_cols.empty:
+        st.subheader("Categorical Columns Summary")
+        for col in cat_cols:
+            st.write(f"**{col}**: {df[col].nunique()} unique values")
+            st.write(df[col].value_counts().head())
+
 def clean_data(df):
     """Clean the dataset based on user selections"""
     st.subheader("Data Cleaning Options")
     
-    # Display missing values info
-    missing_values = df.isnull().sum()
-    if missing_values.sum() > 0:
-        st.warning("Missing values detected in the dataset:")
-        st.write(missing_values[missing_values > 0])
-        
-        # Handle missing values
-        st.markdown("### Handle Missing Values")
+    with st.expander("Missing Value Handling", expanded=True):
+        # Display missing values info
+        missing_values = df.isnull().sum()
         missing_cols = missing_values[missing_values > 0].index.tolist()
-        for col in missing_cols:
-            col1, col2 = st.columns(2)
-            with col1:
-                action = st.selectbox(
-                    f"Action for '{col}' ({df[col].dtype})",
-                    ["Drop column", "Drop rows", "Fill with mean/median/mode", "Fill with value"],
-                    key=f"missing_{col}"
-                )
-            with col2:
-                if action == "Fill with mean/median/mode":
-                    if pd.api.types.is_numeric_dtype(df[col]):
-                        fill_method = st.selectbox(
-                            "Fill method",
-                            ["mean", "median"],
-                            key=f"fill_method_{col}"
-                        )
-                    else:
-                        fill_method = "mode"
-                elif action == "Fill with value":
-                    fill_value = st.text_input("Fill value", key=f"fill_value_{col}")
-                else:
-                    st.write("")
         
-        if st.button("Apply Missing Value Handling"):
+        if missing_cols:
+            st.write("Columns with missing values:")
+            for col in missing_cols:
+                null_count = missing_values[col]
+                null_pct = (null_count / len(df)) * 100
+                st.write(f"- **{col}**: {null_count} nulls ({null_pct:.2f}%)")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    action = st.selectbox(
+                        f"Action for '{col}'",
+                        ["Keep as is", "Drop column", "Drop rows", "Fill with mean/median/mode", "Fill with value"],
+                        key=f"missing_{col}"
+                    )
+                with col2:
+                    if action == "Fill with mean/median/mode":
+                        if pd.api.types.is_numeric_dtype(df[col]):
+                            fill_method = st.selectbox(
+                                "Fill method",
+                                ["mean", "median"],
+                                key=f"fill_method_{col}"
+                            )
+                        else:
+                            fill_method = "mode"
+                            st.write("Will fill with mode (most frequent value)")
+                    elif action == "Fill with value":
+                        fill_value = st.text_input("Fill value", key=f"fill_value_{col}")
+                    else:
+                        st.write("")
+        else:
+            st.info("No missing values found in the dataset")
+    
+    with st.expander("Duplicate Handling"):
+        duplicates = df.duplicated().sum()
+        if duplicates > 0:
+            st.warning(f"Found {duplicates} duplicate rows in the dataset.")
+            if st.checkbox("Remove duplicate rows", key="remove_duplicates"):
+                df = df.drop_duplicates()
+                st.success(f"Removed {duplicates} duplicate rows.")
+        else:
+            st.info("No duplicate rows found")
+    
+    if st.button("Apply Cleaning", key="apply_cleaning"):
+        if missing_cols:
             for col in missing_cols:
                 action = st.session_state.get(f"missing_{col}")
                 if action == "Drop column":
@@ -110,18 +163,9 @@ def clean_data(df):
                         st.success(f"Filled '{col}' with value: {fill_value}")
                     except ValueError:
                         st.error(f"Invalid fill value for column {col}")
-            st.session_state.df = df.copy()
-            st.experimental_rerun()
-    
-    # Handle duplicates
-    duplicates = df.duplicated().sum()
-    if duplicates > 0:
-        st.warning(f"Found {duplicates} duplicate rows in the dataset.")
-        if st.checkbox("Remove duplicate rows"):
-            df = df.drop_duplicates()
-            st.success(f"Removed {duplicates} duplicate rows.")
-            st.session_state.df = df.copy()
-            st.experimental_rerun()
+        
+        st.session_state.df = df.copy()
+        st.experimental_rerun()
     
     return df
 
@@ -190,99 +234,123 @@ def plot_data(df, features, target):
             "Line Plot",
             "Histogram",
             "Correlation Heatmap",
-            "Pair Plot"
+            "Pair Plot",
+            "Distribution Plot"
         ]
     )
     
     # For plots that need feature selection
     if plot_type not in ["Correlation Heatmap", "Pair Plot"]:
-        selected_feature = st.selectbox("Select feature to plot", features)
+        if plot_type in ["Histogram", "Distribution Plot"]:
+            selected_features = st.multiselect(
+                "Select features to plot", 
+                features,
+                default=[features[0]] if features else []
+            )
+        else:
+            selected_features = st.selectbox("Select feature to plot", features)
     
     # For plots that need target selection (if target is specified)
-    if target and plot_type not in ["Correlation Heatmap", "Pair Plot", "Histogram"]:
+    if target and plot_type not in ["Correlation Heatmap", "Pair Plot", "Histogram", "Distribution Plot"]:
         use_target = st.checkbox("Use target variable in plot", True)
     else:
         use_target = False
     
-    # Create the plot
-    fig, ax = plt.subplots(figsize=(10, 6))
-    
-    try:
-        if plot_type == "Scatter Plot":
-            if use_target:
-                sns.scatterplot(data=df, x=selected_feature, y=target, ax=ax)
-            else:
-                sns.scatterplot(data=df, x=selected_feature, ax=ax)
-            ax.set_title(f"Scatter Plot: {selected_feature} vs {target if use_target else 'count'}")
+    if st.button("Generate Plot"):
+        # Create the plot
+        fig, ax = plt.subplots(figsize=(10, 6))
         
-        elif plot_type == "Box Plot":
-            if use_target:
-                sns.boxplot(data=df, x=target, y=selected_feature, ax=ax)
-            else:
-                sns.boxplot(data=df, y=selected_feature, ax=ax)
-            ax.set_title(f"Box Plot: {selected_feature} by {target if use_target else ''}")
-        
-        elif plot_type == "Violin Plot":
-            if use_target:
-                sns.violinplot(data=df, x=target, y=selected_feature, ax=ax)
-            else:
-                sns.violinplot(data=df, y=selected_feature, ax=ax)
-            ax.set_title(f"Violin Plot: {selected_feature} by {target if use_target else ''}")
-        
-        elif plot_type == "Bar Plot":
-            if use_target:
-                sns.barplot(data=df, x=selected_feature, y=target, ax=ax, estimator=np.mean)
-            else:
-                df[selected_feature].value_counts().plot(kind='bar', ax=ax)
-            ax.set_title(f"Bar Plot: {selected_feature} vs {target if use_target else 'count'}")
-        
-        elif plot_type == "Line Plot":
-            if use_target:
-                sns.lineplot(data=df, x=selected_feature, y=target, ax=ax)
-            else:
-                st.warning("Line plot requires a target variable")
-                return
-            ax.set_title(f"Line Plot: {selected_feature} vs {target}")
-        
-        elif plot_type == "Histogram":
-            sns.histplot(data=df, x=selected_feature, kde=True, ax=ax)
-            ax.set_title(f"Distribution of {selected_feature}")
-        
-        elif plot_type == "Correlation Heatmap":
-            numeric_cols = df.select_dtypes(include=np.number).columns.tolist()
-            if len(numeric_cols) < 2:
-                st.warning("Need at least 2 numeric columns for correlation heatmap")
-                return
+        try:
+            if plot_type == "Scatter Plot":
+                if use_target:
+                    sns.scatterplot(data=df, x=selected_features, y=target, ax=ax)
+                    ax.set_title(f"Scatter Plot: {selected_features} vs {target}")
+                else:
+                    st.warning("Scatter plot requires both x and y variables")
+                    return
             
-            corr = df[numeric_cols].corr()
-            sns.heatmap(corr, annot=True, cmap='coolwarm', center=0, ax=ax)
-            ax.set_title("Correlation Heatmap")
+            elif plot_type == "Box Plot":
+                if use_target:
+                    sns.boxplot(data=df, x=target, y=selected_features, ax=ax)
+                    ax.set_title(f"Box Plot: {selected_features} by {target}")
+                else:
+                    sns.boxplot(data=df, y=selected_features, ax=ax)
+                    ax.set_title(f"Box Plot: {selected_features}")
+            
+            elif plot_type == "Violin Plot":
+                if use_target:
+                    sns.violinplot(data=df, x=target, y=selected_features, ax=ax)
+                    ax.set_title(f"Violin Plot: {selected_features} by {target}")
+                else:
+                    sns.violinplot(data=df, y=selected_features, ax=ax)
+                    ax.set_title(f"Violin Plot: {selected_features}")
+            
+            elif plot_type == "Bar Plot":
+                if use_target:
+                    sns.barplot(data=df, x=selected_features, y=target, ax=ax, estimator=np.mean)
+                    ax.set_title(f"Bar Plot: {selected_features} vs {target}")
+                else:
+                    df[selected_features].value_counts().plot(kind='bar', ax=ax)
+                    ax.set_title(f"Bar Plot: {selected_features}")
+            
+            elif plot_type == "Line Plot":
+                if use_target:
+                    sns.lineplot(data=df, x=selected_features, y=target, ax=ax)
+                    ax.set_title(f"Line Plot: {selected_features} vs {target}")
+                else:
+                    st.warning("Line plot requires a target variable")
+                    return
+            
+            elif plot_type == "Histogram":
+                for feature in selected_features:
+                    sns.histplot(data=df, x=feature, kde=True, ax=ax, alpha=0.4, label=feature)
+                ax.set_title(f"Distribution of {', '.join(selected_features)}")
+                if len(selected_features) > 1:
+                    ax.legend()
+            
+            elif plot_type == "Distribution Plot":
+                for feature in selected_features:
+                    sns.kdeplot(data=df, x=feature, ax=ax, label=feature)
+                ax.set_title(f"Distribution of {', '.join(selected_features)}")
+                if len(selected_features) > 1:
+                    ax.legend()
+            
+            elif plot_type == "Correlation Heatmap":
+                numeric_cols = df.select_dtypes(include=np.number).columns.tolist()
+                if len(numeric_cols) < 2:
+                    st.warning("Need at least 2 numeric columns for correlation heatmap")
+                    return
+                
+                corr = df[numeric_cols].corr()
+                fig, ax = plt.subplots(figsize=(12, 8))
+                sns.heatmap(corr, annot=True, cmap='coolwarm', center=0, ax=ax)
+                ax.set_title("Correlation Heatmap")
+            
+            elif plot_type == "Pair Plot":
+                cols_to_plot = st.multiselect(
+                    "Select columns for pair plot",
+                    df.columns.tolist(),
+                    default=features[:3] + ([target] if target else [])  # Limit to first 3 features + target
+                )
+                
+                if len(cols_to_plot) < 2:
+                    st.warning("Please select at least 2 columns for pair plot")
+                    return
+                
+                if target and target in cols_to_plot:
+                    hue_col = target
+                else:
+                    hue_col = None
+                
+                pair_plot = sns.pairplot(df[cols_to_plot], hue=hue_col)
+                st.pyplot(pair_plot)
+                return  # Skip the regular fig display for pairplot
+            
+            plt.tight_layout()
+            st.pyplot(fig)
         
-        elif plot_type == "Pair Plot":
-            cols_to_plot = st.multiselect(
-                "Select columns for pair plot",
-                df.columns.tolist(),
-                default=features[:5]  # Limit to first 5 features by default
-            )
-            
-            if len(cols_to_plot) < 2:
-                st.warning("Please select at least 2 columns for pair plot")
-                return
-            
-            if target:
-                hue_col = target
-            else:
-                hue_col = None
-            
-            pair_plot = sns.pairplot(df[cols_to_plot + ([target] if target else [])], hue=hue_col)
-            st.pyplot(pair_plot)
-            return  # Skip the regular fig display for pairplot
-        
-        plt.tight_layout()
-        st.pyplot(fig)
-    
-    except Exception as e:
-        st.error(f"Error creating plot: {e}")
+        except Exception as e:
+            st.error(f"Error creating plot: {e}")
 
 def main():
     st.title("🔍 Data Explorer & Preprocessor")
@@ -315,6 +383,10 @@ def main():
                 st.subheader("Raw Data Preview")
                 st.dataframe(df.head())
             
+            # Show data quality report
+            if st.checkbox("Show Data Quality Report", key="show_quality_report"):
+                show_data_issues(df)
+            
             # Select target column
             st.sidebar.header("Select Target Column")
             all_columns = df.columns.tolist()
@@ -331,13 +403,13 @@ def main():
             
             # Data cleaning section
             st.header("Data Cleaning & Preprocessing")
-            if st.checkbox("Show data cleaning options"):
+            if st.checkbox("Show data cleaning options", key="show_cleaning_options"):
                 df = clean_data(df)
                 st.session_state.df = df.copy()
             
             # Feature scaling section
             numeric_cols = df.select_dtypes(include=np.number).columns.tolist()
-            if numeric_cols and st.checkbox("Show feature scaling options"):
+            if numeric_cols and st.checkbox("Show feature scaling options", key="show_scaling_options"):
                 df = scale_data(df, numeric_cols)
                 st.session_state.df = df.copy()
             
@@ -346,7 +418,7 @@ def main():
             plot_data(df, features, target)
             
             # Show processed data
-            if st.checkbox("Show processed data"):
+            if st.checkbox("Show processed data", key="show_processed_data"):
                 st.subheader("Processed Data")
                 st.dataframe(df.head())
 
