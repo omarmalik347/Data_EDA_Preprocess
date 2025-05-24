@@ -6,3 +6,11 @@ seaborn>=0.12.0
 scikit-learn>=1.2.0
 openpyxl>=3.0.0  # For Excel file support
 xlrd>=2.0.0      # For older Excel file support
+xgboost>=1.7.5
+joblib>=1.2.0
+
+
+
+
+
+
