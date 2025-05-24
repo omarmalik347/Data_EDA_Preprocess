@@ -4,19 +4,17 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, RobustScaler, LabelEncoder
-from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.model_selection import train_test_split
 from sklearn.metrics import (accuracy_score, precision_score, recall_score, 
                              f1_score, mean_squared_error, r2_score, 
                              confusion_matrix, classification_report)
-from sklearn.linear_model import LogisticRegression, LinearRegression, Ridge, Lasso
+from sklearn.linear_model import LogisticRegression, LinearRegression
+from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.svm import SVC, SVR
-from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
-from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
-from xgboost import XGBClassifier, XGBRegressor
 from sklearn.naive_bayes import GaussianNB
+from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
 from sklearn.neural_network import MLPClassifier, MLPRegressor
-import pickle
 import io
 import joblib
 
@@ -44,6 +42,9 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
+# ==============================================
+# Data Exploration Functions (Your original code)
+# ==============================================
 def load_data(uploaded_file):
     """Load data from uploaded file (CSV or Excel)"""
     try:
@@ -170,7 +171,6 @@ def clean_data(df):
                 elif action == "Fill with value":
                     fill_value = st.session_state.get(f"fill_value_{col}")
                     try:
-                        # Try to convert to appropriate type
                         if pd.api.types.is_numeric_dtype(df[col]):
                             fill_value = float(fill_value)
                         df[col] = df[col].fillna(fill_value)
@@ -221,16 +221,6 @@ def scale_data(df, numeric_cols):
         
         st.success(f"Applied {scaler_type} to selected columns.")
         
-        # Show before/after comparison
-        st.subheader("Scaling Results Comparison")
-        col1, col2 = st.columns(2)
-        with col1:
-            st.write("**Before Scaling**")
-            st.write(df[cols_to_scale].describe())
-        with col2:
-            st.write("**After Scaling**")
-            st.write(df_scaled[cols_to_scale].describe())
-        
         st.session_state.df = df_scaled.copy()
         st.session_state.data_scaled = True
         st.experimental_rerun()
@@ -243,103 +233,51 @@ def plot_data(df, features, target):
     
     plot_type = st.selectbox(
         "Select plot type",
-        [
-            "Scatter Plot",
-            "Box Plot",
-            "Violin Plot",
-            "Bar Plot",
-            "Line Plot",
-            "Histogram",
-            "Correlation Heatmap",
-            "Pair Plot",
-            "Distribution Plot"
-        ]
+        ["Scatter Plot", "Box Plot", "Violin Plot", "Bar Plot", 
+         "Line Plot", "Histogram", "Correlation Heatmap", "Pair Plot"]
     )
     
-    # For plots that need feature selection
-    if plot_type not in ["Correlation Heatmap", "Pair Plot"]:
-        if plot_type in ["Histogram", "Distribution Plot"]:
-            selected_features = st.multiselect(
-                "Select features to plot", 
-                features,
-                default=[features[0]] if features else []
-            )
-        else:
-            selected_features = st.selectbox("Select feature to plot", features)
-    
-    # For plots that need target selection (if target is specified)
-    if target and plot_type not in ["Correlation Heatmap", "Pair Plot", "Histogram", "Distribution Plot"]:
-        use_target = st.checkbox("Use target variable in plot", True)
-    else:
-        use_target = False
-    
     if st.button("Generate Plot"):
-        # Create the plot
         fig, ax = plt.subplots(figsize=(10, 6))
         
         try:
             if plot_type == "Scatter Plot":
-                if use_target:
-                    sns.scatterplot(data=df, x=selected_features, y=target, ax=ax)
-                    ax.set_title(f"Scatter Plot: {selected_features} vs {target}")
-                else:
-                    st.warning("Scatter plot requires both x and y variables")
-                    return
+                selected_feature = st.selectbox("Select feature to plot", features)
+                sns.scatterplot(data=df, x=selected_feature, y=target, ax=ax)
+                ax.set_title(f"Scatter Plot: {selected_feature} vs {target}")
             
             elif plot_type == "Box Plot":
-                if use_target:
-                    sns.boxplot(data=df, x=target, y=selected_features, ax=ax)
-                    ax.set_title(f"Box Plot: {selected_features} by {target}")
-                else:
-                    sns.boxplot(data=df, y=selected_features, ax=ax)
-                    ax.set_title(f"Box Plot: {selected_features}")
+                selected_feature = st.selectbox("Select feature to plot", features)
+                sns.boxplot(data=df, x=target, y=selected_feature, ax=ax)
+                ax.set_title(f"Box Plot: {selected_feature} by {target}")
             
             elif plot_type == "Violin Plot":
-                if use_target:
-                    sns.violinplot(data=df, x=target, y=selected_features, ax=ax)
-                    ax.set_title(f"Violin Plot: {selected_features} by {target}")
-                else:
-                    sns.violinplot(data=df, y=selected_features, ax=ax)
-                    ax.set_title(f"Violin Plot: {selected_features}")
+                selected_feature = st.selectbox("Select feature to plot", features)
+                sns.violinplot(data=df, x=target, y=selected_feature, ax=ax)
+                ax.set_title(f"Violin Plot: {selected_feature} by {target}")
             
             elif plot_type == "Bar Plot":
-                if use_target:
-                    sns.barplot(data=df, x=selected_features, y=target, ax=ax, estimator=np.mean)
-                    ax.set_title(f"Bar Plot: {selected_features} vs {target}")
-                else:
-                    df[selected_features].value_counts().plot(kind='bar', ax=ax)
-                    ax.set_title(f"Bar Plot: {selected_features}")
+                selected_feature = st.selectbox("Select feature to plot", features)
+                sns.barplot(data=df, x=selected_feature, y=target, ax=ax, estimator=np.mean)
+                ax.set_title(f"Bar Plot: {selected_feature} vs {target}")
             
             elif plot_type == "Line Plot":
-                if use_target:
-                    sns.lineplot(data=df, x=selected_features, y=target, ax=ax)
-                    ax.set_title(f"Line Plot: {selected_features} vs {target}")
-                else:
-                    st.warning("Line plot requires a target variable")
-                    return
+                selected_feature = st.selectbox("Select feature to plot", features)
+                sns.lineplot(data=df, x=selected_feature, y=target, ax=ax)
+                ax.set_title(f"Line Plot: {selected_feature} vs {target}")
             
             elif plot_type == "Histogram":
-                for feature in selected_features:
-                    sns.histplot(data=df, x=feature, kde=True, ax=ax, alpha=0.4, label=feature)
-                ax.set_title(f"Distribution of {', '.join(selected_features)}")
-                if len(selected_features) > 1:
-                    ax.legend()
-            
-            elif plot_type == "Distribution Plot":
-                for feature in selected_features:
-                    sns.kdeplot(data=df, x=feature, ax=ax, label=feature)
-                ax.set_title(f"Distribution of {', '.join(selected_features)}")
-                if len(selected_features) > 1:
-                    ax.legend()
+                selected_feature = st.selectbox("Select feature to plot", features)
+                sns.histplot(data=df, x=selected_feature, kde=True, ax=ax)
+                ax.set_title(f"Distribution of {selected_feature}")
             
             elif plot_type == "Correlation Heatmap":
                 numeric_cols = df.select_dtypes(include=np.number).columns.tolist()
                 if len(numeric_cols) < 2:
                     st.warning("Need at least 2 numeric columns for correlation heatmap")
                     return
-                
                 corr = df[numeric_cols].corr()
-                fig, ax = plt.subplots(figsize=(12, 8))
+                fig, ax = plt.subplots(figsize=(10, 8))
                 sns.heatmap(corr, annot=True, cmap='coolwarm', center=0, ax=ax)
                 ax.set_title("Correlation Heatmap")
             
@@ -347,21 +285,14 @@ def plot_data(df, features, target):
                 cols_to_plot = st.multiselect(
                     "Select columns for pair plot",
                     df.columns.tolist(),
-                    default=features[:3] + ([target] if target else [])  # Limit to first 3 features + target
+                    default=features[:3] + ([target] if target else [])
                 )
-                
                 if len(cols_to_plot) < 2:
                     st.warning("Please select at least 2 columns for pair plot")
                     return
-                
-                if target and target in cols_to_plot:
-                    hue_col = target
-                else:
-                    hue_col = None
-                
-                pair_plot = sns.pairplot(df[cols_to_plot], hue=hue_col)
+                pair_plot = sns.pairplot(df[cols_to_plot], hue=target if target else None)
                 st.pyplot(pair_plot)
-                return  # Skip the regular fig display for pairplot
+                return
             
             plt.tight_layout()
             st.pyplot(fig)
@@ -369,266 +300,284 @@ def plot_data(df, features, target):
         except Exception as e:
             st.error(f"Error creating plot: {e}")
 
-def train_ml_model(df, target):
-    """Train machine learning model based on user selections"""
-    st.subheader("Machine Learning Model Training")
-    
-    # Determine problem type
-    if pd.api.types.is_numeric_dtype(df[target]):
-        unique_values = df[target].nunique()
-        if unique_values < 10 and unique_values > 0:
-            problem_type = st.radio(
-                "Problem type",
-                ["classification", "regression"],
-                index=0
-            )
-        else:
-            problem_type = "regression"
-    else:
-        problem_type = "classification"
-    
-    st.write(f"**Problem Type:** {problem_type.capitalize()}")
-    
-    # Separate features and target
-    X = df.drop(columns=[target])
-    y = df[target]
-    
-    # Encode target if classification
-    label_encoder = None
-    if problem_type == "classification":
-        label_encoder = LabelEncoder()
-        y_encoded = label_encoder.fit_transform(y)
-    else:
-        y_encoded = y
-    
-    # Train-test split
-    test_size = st.slider("Test set size (%)", 10, 40, 20) / 100
-    X_train, X_test, y_train, y_test = train_test_split(X, y_encoded, test_size=test_size, random_state=42)
-    
-    # Model selection
-    model_options = {
-        "classification": {
-            "Logistic Regression": LogisticRegression(),
-            "Random Forest": RandomForestClassifier(),
-            "SVM": SVC(),
-            "Decision Tree": DecisionTreeClassifier(),
-            "KNN": KNeighborsClassifier(),
-            "XGBoost": XGBClassifier(),
-            "Naive Bayes": GaussianNB(),
-            "Neural Network": MLPClassifier(max_iter=1000)
-        },
-        "regression": {
-            "Linear Regression": LinearRegression(),
-            "Random Forest": RandomForestRegressor(),
-            "SVR": SVR(),
-            "Decision Tree": DecisionTreeRegressor(),
-            "KNN": KNeighborsRegressor(),
-            "XGBoost": XGBRegressor(),
-            "Ridge": Ridge(),
-            "Lasso": Lasso(),
-            "Neural Network": MLPRegressor(max_iter=1000)
-        }
-    }
-    
-    model_name = st.selectbox(
-        f"Select {problem_type} model",
-        list(model_options[problem_type].keys())
-    )
-    # Hyperparameter tuning
-    st.markdown("### Hyperparameter Tuning (Optional)")
-    if st.checkbox("Enable hyperparameter tuning", False):
-        param_grid = {}
-        if model_name == "Random Forest":
-            param_grid = {
-                'n_estimators': [50, 100, 200],
-                'max_depth': [None, 10, 20],
-                'min_samples_split': [2, 5]
-            }
-        elif model_name == "Logistic Regression":
-            param_grid = {
-                'C': [0.1, 1, 10],
-                'penalty': ['l1', 'l2']
-            }
-        # Add more parameter grids for other models...
-        
-        if param_grid:
-            grid_search = GridSearchCV(
-                model_options[problem_type][model_name],
-                param_grid,
-                cv=5,
-                scoring='accuracy' if problem_type == 'classification' else 'r2'
-            )
-            grid_search.fit(X_train, y_train)
-            model = grid_search.best_estimator_
-            st.success(f"Best parameters: {grid_search.best_params_}")
-        else:
-            model = model_options[problem_type][model_name]
-    else:
-        model = model_options[problem_type][model_name]
-    
-    # Train model
-    if st.button("Train Model"):
-        with st.spinner(f"Training {model_name}..."):
-            # Scale features
-            scaler = StandardScaler()
-            X_train_scaled = scaler.fit_transform(X_train)
-            X_test_scaled = scaler.transform(X_test)
-            
-            model.fit(X_train_scaled, y_train)
-            
-            # Make predictions
-            y_pred = model.predict(X_test_scaled)
-            
-            # Evaluate model
-            st.subheader("Model Evaluation")
-            
-            if problem_type == "classification":
-                st.write("**Classification Report:**")
-                st.text(classification_report(y_test, y_pred, target_names=label_encoder.classes_ if label_encoder else None))
-                
-                st.write("**Confusion Matrix:**")
-                cm = confusion_matrix(y_test, y_pred)
-                fig, ax = plt.subplots()
-                sns.heatmap(cm, annot=True, fmt='d', ax=ax)
-                st.pyplot(fig)
-                
-                st.write("**Metrics:**")
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("Accuracy", f"{accuracy_score(y_test, y_pred):.2f}")
-                with col2:
-                    st.metric("Precision", f"{precision_score(y_test, y_pred, average='weighted'):.2f}")
-                with col3:
-                    st.metric("Recall", f"{recall_score(y_test, y_pred, average='weighted'):.2f}")
-                
-            else:  # regression
-                st.write("**Regression Metrics:**")
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("R² Score", f"{r2_score(y_test, y_pred):.2f}")
-                with col2:
-                    st.metric("MSE", f"{mean_squared_error(y_test, y_pred):.2f}")
-                with col3:
-                    st.metric("MAE", f"{mean_absolute_error(y_test, y_pred):.2f}")
-                
-                # Plot actual vs predicted
-                fig, ax = plt.subplots()
-                sns.scatterplot(x=y_test, y=y_pred, ax=ax)
-                ax.plot([y_test.min(), y_test.max()], [y_test.min(), y_test.max()], 'k--', lw=2)
-                ax.set_xlabel("Actual")
-                ax.set_ylabel("Predicted")
-                st.pyplot(fig)
-            
-            # Save model artifacts to session state
-            st.session_state.trained_model = model
-            st.session_state.scaler = scaler
-            st.session_state.label_encoder = label_encoder
-            st.session_state.model_trained = True
-            st.session_state.feature_columns = X.columns.tolist()
-            st.session_state.target_column = target
-            st.session_state.problem_type = problem_type
-            
-            # Model download
-            st.subheader("Model Download")
-            model_bytes = io.BytesIO()
-            joblib.dump({
-                'model': model,
-                'scaler': scaler,
-                'label_encoder': label_encoder,
-                'feature_columns': X.columns.tolist(),
-                'target_column': target,
-                'problem_type': problem_type
-            }, model_bytes)
-            st.download_button(
-                label="Download Trained Model",
-                data=model_bytes.getvalue(),
-                file_name=f"{model_name.replace(' ', '_')}.pkl",
-                mime="application/octet-stream"
-            )
-            
-            return model
+# ==============================================
+# Machine Learning Functions (Your provided code)
+# ==============================================
+class MachineLearningApp:
+    def __init__(self):
+        self.initialize_session_state()
 
-def make_predictions():
-    """Make predictions using trained model"""
-    st.subheader("Make Predictions")
-    
-    prediction_type = st.radio(
-        "Prediction input method",
-        ["Use test file", "Manual input"],
-        horizontal=True
-    )
-    
-    if prediction_type == "Use test file":
-        test_file = st.file_uploader(
-            "Upload test file (CSV or Excel)",
-            type=['csv', 'xls', 'xlsx']
-        )
+    def initialize_session_state(self):
+        initial_states = {
+            'data': None,
+            'X': None,
+            'y': None,
+            'model': None,
+            'scaler': None,
+            'label_encoder': None,
+            'problem_type': None,
+            'test_size': 0.2,
+            'selected_features': [],
+            'target_column': None,
+            'selected_model': None,
+            'model_results': None
+        }
         
-        if test_file:
+        for key, value in initial_states.items():
+            if key not in st.session_state:
+                st.session_state[key] = value
+
+    def sidebar_data_upload(self):
+        with st.sidebar:
+            st.header("📊 Data Upload")
+            uploaded_file = st.file_uploader(
+                "Choose a CSV or Excel file", 
+                type=['csv', 'xlsx', 'xls']
+            )
+            return uploaded_file
+
+    def sidebar_feature_selection(self, df):
+        with st.sidebar:
+            st.header("🔍 Feature Selection")
+            
+            if df is None:
+                st.warning("Please upload a dataset first.")
+                return None, None, None
+            
+            numeric_cols = df.select_dtypes(include=['int64', 'float64']).columns.tolist()
+            categorical_cols = df.select_dtypes(include=['object']).columns.tolist()
+            
+            selected_features = st.multiselect(
+                "Select Features", 
+                options=list(df.columns),
+                default=numeric_cols
+            )
+            
+            target_column = st.selectbox(
+                "Select Target Column", 
+                options=list(df.columns)
+            )
+            
+            test_size = st.slider(
+                "Test Set Percentage", 
+                min_value=0.1, 
+                max_value=0.5, 
+                value=0.2, 
+                step=0.05
+            )
+            
+            return selected_features, target_column, test_size
+
+    def sidebar_model_selection(self, problem_type):
+        with st.sidebar:
+            st.header("🤖 Model Selection")
+            
+            if problem_type == 'classification':
+                models = {
+                    'Logistic Regression': LogisticRegression(),
+                    'Decision Tree': DecisionTreeClassifier(),
+                    'Random Forest': RandomForestClassifier(),
+                    'SVM': SVC(),
+                    'Naive Bayes (Gaussian)': GaussianNB(),
+                    'K-Nearest Neighbors': KNeighborsClassifier(),
+                    'Neural Network': MLPClassifier(max_iter=1000)
+                }
+            else:
+                models = {
+                    'Linear Regression': LinearRegression(),
+                    'Decision Tree': DecisionTreeRegressor(),
+                    'Random Forest': RandomForestRegressor(),
+                    'SVR': SVR(),
+                    'K-Nearest Neighbors': KNeighborsRegressor(),
+                    'Neural Network': MLPRegressor(max_iter=1000)
+                }
+            
+            selected_model = st.selectbox(
+                "Choose a Model", 
+                options=list(models.keys())
+            )
+            
+            return models, selected_model
+
+    def sidebar_prediction_input(self, selected_features):
+        with st.sidebar:
+            st.header("🔮 Prediction Input")
+            
+            if st.session_state.model is None:
+                st.warning("Please train a model first.")
+                return None
+            
+            prediction_inputs = {}
+            for feature in selected_features:
+                prediction_inputs[feature] = st.number_input(
+                    f"Enter {feature}", 
+                    value=0.0,
+                    step=0.1
+                )
+            
+            if st.button("Predict"):
+                return prediction_inputs
+            
+            return None
+
+    def load_and_display_data(self, uploaded_file):
+        if uploaded_file is not None:
             try:
-                if test_file.name.endswith('.csv'):
-                    test_df = pd.read_csv(test_file)
+                if uploaded_file.name.endswith('.csv'):
+                    df = pd.read_csv(uploaded_file)
                 else:
-                    test_df = pd.read_excel(test_file)
+                    df = pd.read_excel(uploaded_file)
                 
-                # Check if features match training data
-                missing_features = set(st.session_state.feature_columns) - set(test_df.columns)
-                if missing_features:
-                    st.error(f"Missing features in test data: {missing_features}")
-                else:
-                    test_df = test_df[st.session_state.feature_columns]
+                st.session_state.data = df
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.subheader("📋 Dataset Preview")
+                    st.dataframe(df.head())
+                
+                with col2:
+                    st.subheader("📊 Dataset Information")
+                    st.write(f"Total Rows: {df.shape[0]}")
+                    st.write(f"Total Columns: {df.shape[1]}")
                     
-                    # Scale features
-                    test_scaled = st.session_state.scaler.transform(test_df)
-                    
-                    # Make predictions
-                    predictions = st.session_state.trained_model.predict(test_scaled)
-                    
-                    # Decode predictions if classification
-                    if st.session_state.label_encoder:
-                        predictions = st.session_state.label_encoder.inverse_transform(predictions)
-                    
-                    # Add predictions to test data
-                    result_df = test_df.copy()
-                    result_df[f"Predicted_{st.session_state.target_column}"] = predictions
-                    
-                    st.write("**Predictions:**")
-                    st.dataframe(result_df)
-                    
-                    # Download predictions
-                    csv = result_df.to_csv(index=False).encode('utf-8')
-                    st.download_button(
-                        label="Download Predictions",
-                        data=csv,
-                        file_name="predictions.csv",
-                        mime="text/csv"
-                    )
+                    col_types = df.dtypes.value_counts()
+                    st.write("Column Types:")
+                    for dtype, count in col_types.items():
+                        st.text(f"{dtype}: {count} columns")
+                
+                return df
             
             except Exception as e:
-                st.error(f"Error processing test file: {e}")
-    
-    else:  # Manual input
-        input_data = {}
-        cols = st.columns(3)
-        for i, feature in enumerate(st.session_state.feature_columns):
-            with cols[i % 3]:
-                input_data[feature] = [st.number_input(feature, key=f"pred_{feature}")]
-        
-        if st.button("Predict"):
-            input_df = pd.DataFrame(input_data)
-            
-            # Scale features
-            input_scaled = st.session_state.scaler.transform(input_df)
-            
-            # Make prediction
-            prediction = st.session_state.trained_model.predict(input_scaled)
-            
-            # Decode prediction if classification
-            if st.session_state.label_encoder:
-                prediction = st.session_state.label_encoder.inverse_transform(prediction)
-            
-            st.success(f"Predicted {st.session_state.target_column}: {prediction[0]}")
+                st.error(f"Error loading file: {e}")
+                return None
 
+    def train_and_evaluate_model(self, X, y, test_size, models, selected_model_name):
+        results_container = st.container()
+        
+        with results_container:
+            X_scaled = StandardScaler().fit_transform(X)
+            
+            problem_type = 'classification' if y.dtype == 'object' else 'regression'
+            
+            label_encoder = None
+            if problem_type == 'classification':
+                label_encoder = LabelEncoder()
+                y_encoded = label_encoder.fit_transform(y)
+            else:
+                y_encoded = y
+            
+            X_train, X_test, y_train, y_test = train_test_split(
+                X_scaled, y_encoded, test_size=test_size, random_state=42
+            )
+            
+            model = models[selected_model_name]
+            
+            model.fit(X_train, y_train)
+            
+            y_pred = model.predict(X_test)
+            
+            st.header("🔬 Model Training Results")
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.subheader("📊 Model Performance")
+                if problem_type == 'classification':
+                    accuracy = accuracy_score(y_test, y_pred)
+                    st.metric("Accuracy", f"{accuracy:.2%}")
+                    
+                    st.subheader("Classification Report")
+                    report = classification_report(
+                        y_test, y_pred, 
+                        target_names=label_encoder.classes_ if label_encoder else None,
+                        output_dict=True
+                    )
+                    
+                    for key, value in report.items():
+                        if isinstance(value, dict):
+                            st.text(f"{key}:")
+                            for metric, score in value.items():
+                                st.text(f"  {metric}: {score:.2f}")
+                
+                else:
+                    mse = mean_squared_error(y_test, y_pred)
+                    mae = mean_absolute_error(y_test, y_pred)
+                    r2 = r2_score(y_test, y_pred)
+                    
+                    st.metric("Mean Squared Error", f"{mse:.4f}")
+                    st.metric("Mean Absolute Error", f"{mae:.4f}")
+                    st.metric("R² Score", f"{r2:.4f}")
+            
+            with col2:
+                st.subheader("📈 Model Details")
+                st.write(f"Selected Model: {selected_model_name}")
+                st.write(f"Problem Type: {problem_type}")
+                st.write(f"Test Set Size: {test_size:.0%}")
+                st.write(f"Features Used: {', '.join(X.columns)}")
+                st.write(f"Target Column: {y.name}")
+            
+            st.session_state.model = model
+            st.session_state.scaler = StandardScaler().fit(X)
+            st.session_state.label_encoder = label_encoder
+            st.session_state.problem_type = problem_type
+            st.session_state.X = X
+
+    def make_prediction(self, prediction_inputs):
+        if st.session_state.model is None:
+            st.error("Please train a model first.")
+            return
+        
+        input_df = pd.DataFrame([prediction_inputs])
+        
+        input_scaled = st.session_state.scaler.transform(input_df)
+        
+        prediction = st.session_state.model.predict(input_scaled)
+        
+        if st.session_state.label_encoder:
+            prediction = st.session_state.label_encoder.inverse_transform(prediction)
+        
+        st.header("🎯 Prediction Result")
+        st.subheader("Input Data")
+        st.dataframe(input_df)
+        
+        st.subheader("Predicted Value")
+        st.write(prediction[0])
+
+    def run_ml_mode(self):
+        """Run the complete ML workflow from your provided code"""
+        st.title("🚀 Machine Learning Pipeline")
+        
+        uploaded_file = self.sidebar_data_upload()
+        df = self.load_and_display_data(uploaded_file)
+        
+        if df is not None:
+            selected_features, target_column, test_size = self.sidebar_feature_selection(df)
+            
+            if selected_features and target_column:
+                X = df[selected_features]
+                y = df[target_column]
+                
+                problem_type = 'classification' if y.dtype == 'object' else 'regression'
+                
+                models, selected_model = self.sidebar_model_selection(problem_type)
+                
+                with st.sidebar:
+                    if st.button("Train Model", type="primary"):
+                        for key in ['model', 'scaler', 'label_encoder', 'problem_type']:
+                            st.session_state[key] = None
+                        
+                        self.train_and_evaluate_model(
+                            X, y, test_size, models, selected_model
+                        )
+                
+                prediction_inputs = self.sidebar_prediction_input(selected_features)
+                
+                if prediction_inputs:
+                    self.make_prediction(prediction_inputs)
+
+# ==============================================
+# Main App Function
+# ==============================================
 def main():
     st.title("🔍 Data Explorer & ML Pipeline")
     
@@ -639,8 +588,6 @@ def main():
         st.session_state.data_cleaned = False
     if 'data_scaled' not in st.session_state:
         st.session_state.data_scaled = False
-    if 'model_trained' not in st.session_state:
-        st.session_state.model_trained = False
     
     # Navigation
     app_mode = st.sidebar.selectbox(
@@ -648,7 +595,7 @@ def main():
         ["Data Exploration", "Machine Learning"]
     )
     
-    # File upload section
+    # File upload section (shared by both modes)
     st.sidebar.header("Data Upload")
     uploaded_file = st.sidebar.file_uploader(
         "Upload your dataset (CSV or Excel)",
@@ -720,53 +667,11 @@ def main():
                     
                     st.write(f"**Processing Status:** {cleaning_status} | {scaling_status}")
                     st.dataframe(df.head())
-                    
-                    # Download processed data
-                    st.markdown("### Download Processed Data")
-                    download_format = st.selectbox("Select download format", ["CSV", "Excel"])
-                    
-                    if download_format == "CSV":
-                        csv = df.to_csv(index=False).encode('utf-8')
-                        st.download_button(
-                            label="Download as CSV",
-                            data=csv,
-                            file_name="processed_data.csv",
-                            mime="text/csv"
-                        )
-                    else:
-                        excel_buffer = io.BytesIO()
-                        with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-                            df.to_excel(writer, index=False)
-                        excel_bytes = excel_buffer.getvalue()
-                        st.download_button(
-                            label="Download as Excel",
-                            data=excel_bytes,
-                            file_name="processed_data.xlsx",
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                        )
             
             elif app_mode == "Machine Learning":
-                st.header("Machine Learning Pipeline")
-                
-                # Show processed data status
-                cleaning_status = "✅ Cleaned" if st.session_state.data_cleaned else "❌ Not cleaned"
-                scaling_status = "✅ Scaled" if st.session_state.data_scaled else "❌ Not scaled"
-                st.write(f"**Data Status:** {cleaning_status} | {scaling_status}")
-                
-                # Select target
-                all_columns = df.columns.tolist()
-                target = st.selectbox(
-                    "Select target variable",
-                    all_columns
-                )
-                
-                # Train model
-                if st.checkbox("Show model training options"):
-                    trained_model = train_ml_model(df, target)
-                
-                # Make predictions if model is trained
-                if st.session_state.get('model_trained', False):
-                    make_predictions()
+                # Switch completely to your ML code
+                ml_app = MachineLearningApp()
+                ml_app.run_ml_mode()
 
 if __name__ == "__main__":
     main()
