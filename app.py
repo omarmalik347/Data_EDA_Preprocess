@@ -460,5 +460,299 @@ def main():
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                     )
 
+import streamlit as st
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.preprocessing import StandardScaler, MinMaxScaler, RobustScaler
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import (accuracy_score, precision_score, recall_score, 
+                             f1_score, roc_auc_score, mean_squared_error, 
+                             r2_score, confusion_matrix, classification_report)
+from sklearn.linear_model import LogisticRegression, LinearRegression, Ridge, Lasso
+from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
+from sklearn.svm import SVC, SVR
+from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
+from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
+from xgboost import XGBClassifier, XGBRegressor
+from sklearn.model_selection import GridSearchCV
+import pickle
+import io
+import joblib
+
+# ... [Keep all previous functions until main()] ...
+
+def train_ml_model(df, target, problem_type):
+    """Train machine learning model based on user selections"""
+    st.subheader("Machine Learning Model Training")
+    
+    # Separate features and target
+    X = df.drop(columns=[target])
+    y = df[target]
+    
+    # Train-test split
+    test_size = st.slider("Test set size (%)", 10, 40, 20) / 100
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, random_state=42)
+    
+    # Model selection
+    model_options = {
+        "classification": {
+            "Logistic Regression": LogisticRegression(),
+            "Random Forest": RandomForestClassifier(),
+            "SVM": SVC(),
+            "Decision Tree": DecisionTreeClassifier(),
+            "KNN": KNeighborsClassifier(),
+            "XGBoost": XGBClassifier()
+        },
+        "regression": {
+            "Linear Regression": LinearRegression(),
+            "Random Forest": RandomForestRegressor(),
+            "SVM": SVR(),
+            "Decision Tree": DecisionTreeRegressor(),
+            "KNN": KNeighborsRegressor(),
+            "XGBoost": XGBRegressor(),
+            "Ridge": Ridge(),
+            "Lasso": Lasso()
+        }
+    }
+    
+    model_name = st.selectbox(
+        f"Select {problem_type} model",
+        list(model_options[problem_type].keys())
+    
+    # Hyperparameter tuning
+    st.markdown("### Hyperparameter Tuning (Optional)")
+    if st.checkbox("Enable hyperparameter tuning", False):
+        param_grid = {}
+        if model_name == "Random Forest":
+            param_grid = {
+                'n_estimators': [50, 100, 200],
+                'max_depth': [None, 10, 20],
+                'min_samples_split': [2, 5]
+            }
+        elif model_name == "Logistic Regression":
+            param_grid = {
+                'C': [0.1, 1, 10],
+                'penalty': ['l1', 'l2']
+            }
+        # Add more parameter grids for other models...
+        
+        if param_grid:
+            grid_search = GridSearchCV(
+                model_options[problem_type][model_name],
+                param_grid,
+                cv=5,
+                scoring='accuracy' if problem_type == 'classification' else 'r2'
+            )
+            grid_search.fit(X_train, y_train)
+            model = grid_search.best_estimator_
+            st.success(f"Best parameters: {grid_search.best_params_}")
+        else:
+            model = model_options[problem_type][model_name]
+    else:
+        model = model_options[problem_type][model_name]
+    
+    # Train model
+    if st.button("Train Model"):
+        with st.spinner(f"Training {model_name}..."):
+            model.fit(X_train, y_train)
+            
+            # Make predictions
+            y_pred = model.predict(X_test)
+            
+            # Evaluate model
+            st.subheader("Model Evaluation")
+            
+            if problem_type == "classification":
+                st.write("**Classification Report:**")
+                st.text(classification_report(y_test, y_pred))
+                
+                st.write("**Confusion Matrix:**")
+                cm = confusion_matrix(y_test, y_pred)
+                fig, ax = plt.subplots()
+                sns.heatmap(cm, annot=True, fmt='d', ax=ax)
+                st.pyplot(fig)
+                
+                st.write("**Metrics:**")
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Accuracy", f"{accuracy_score(y_test, y_pred):.2f}")
+                with col2:
+                    st.metric("Precision", f"{precision_score(y_test, y_pred, average='weighted'):.2f}")
+                with col3:
+                    st.metric("Recall", f"{recall_score(y_test, y_pred, average='weighted'):.2f}")
+                
+            else:  # regression
+                st.write("**Regression Metrics:**")
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("R² Score", f"{r2_score(y_test, y_pred):.2f}")
+                with col2:
+                    st.metric("MSE", f"{mean_squared_error(y_test, y_pred):.2f}")
+                
+                # Plot actual vs predicted
+                fig, ax = plt.subplots()
+                sns.scatterplot(x=y_test, y=y_pred, ax=ax)
+                ax.plot([y_test.min(), y_test.max()], [y_test.min(), y_test.max()], 'k--', lw=2)
+                ax.set_xlabel("Actual")
+                ax.set_ylabel("Predicted")
+                st.pyplot(fig)
+            
+            # Save model to session state
+            st.session_state.trained_model = model
+            st.session_state.model_trained = True
+            st.session_state.feature_columns = X.columns.tolist()
+            st.session_state.target_column = target
+            
+            # Model download
+            st.subheader("Model Download")
+            model_bytes = io.BytesIO()
+            joblib.dump(model, model_bytes)
+            st.download_button(
+                label="Download Trained Model",
+                data=model_bytes.getvalue(),
+                file_name=f"{model_name.replace(' ', '_')}.pkl",
+                mime="application/octet-stream"
+            )
+            
+            return model
+
+def make_predictions():
+    """Make predictions using trained model"""
+    st.subheader("Make Predictions")
+    
+    prediction_type = st.radio(
+        "Prediction input method",
+        ["Use test file", "Manual input"]
+    )
+    
+    if prediction_type == "Use test file":
+        test_file = st.file_uploader(
+            "Upload test file (CSV or Excel)",
+            type=['csv', 'xls', 'xlsx']
+        )
+        
+        if test_file:
+            try:
+                if test_file.name.endswith('.csv'):
+                    test_df = pd.read_csv(test_file)
+                else:
+                    test_df = pd.read_excel(test_file)
+                
+                # Check if features match training data
+                missing_features = set(st.session_state.feature_columns) - set(test_df.columns)
+                if missing_features:
+                    st.error(f"Missing features in test data: {missing_features}")
+                else:
+                    test_df = test_df[st.session_state.feature_columns]
+                    predictions = st.session_state.trained_model.predict(test_df)
+                    
+                    # Add predictions to test data
+                    result_df = test_df.copy()
+                    result_df[f"Predicted_{st.session_state.target_column}"] = predictions
+                    
+                    st.write("**Predictions:**")
+                    st.dataframe(result_df)
+                    
+                    # Download predictions
+                    csv = result_df.to_csv(index=False).encode('utf-8')
+                    st.download_button(
+                        label="Download Predictions",
+                        data=csv,
+                        file_name="predictions.csv",
+                        mime="text/csv"
+                    )
+            
+            except Exception as e:
+                st.error(f"Error processing test file: {e}")
+    
+    else:  # Manual input
+        input_data = {}
+        cols = st.columns(3)
+        for i, feature in enumerate(st.session_state.feature_columns):
+            with cols[i % 3]:
+                input_data[feature] = [st.number_input(feature, key=f"pred_{feature}")]
+        
+        if st.button("Predict"):
+            input_df = pd.DataFrame(input_data)
+            prediction = st.session_state.trained_model.predict(input_df)
+            st.success(f"Predicted {st.session_state.target_column}: {prediction[0]}")
+
+def main():
+    st.title("🔍 Data Explorer & ML Pipeline")
+    
+    # Initialize session state
+    if 'df' not in st.session_state:
+        st.session_state.df = None
+    if 'data_cleaned' not in st.session_state:
+        st.session_state.data_cleaned = False
+    if 'data_scaled' not in st.session_state:
+        st.session_state.data_scaled = False
+    if 'model_trained' not in st.session_state:
+        st.session_state.model_trained = False
+    
+    # Navigation
+    app_mode = st.sidebar.selectbox(
+        "Select Mode",
+        ["Data Exploration", "Machine Learning"]
+    )
+    
+    # File upload section
+    st.sidebar.header("Data Upload")
+    uploaded_file = st.sidebar.file_uploader(
+        "Upload your dataset (CSV or Excel)",
+        type=['csv', 'xls', 'xlsx']
+    )
+    
+    if uploaded_file is not None:
+        if st.session_state.df is None:
+            st.session_state.df = load_data(uploaded_file)
+        
+        if st.session_state.df is not None:
+            df = st.session_state.df
+            
+            if app_mode == "Data Exploration":
+                # ... [Keep all previous data exploration code] ...
+                
+            elif app_mode == "Machine Learning":
+                st.header("Machine Learning Pipeline")
+                
+                # Show processed data status
+                cleaning_status = "✅ Cleaned" if st.session_state.data_cleaned else "❌ Not cleaned"
+                scaling_status = "✅ Scaled" if st.session_state.data_scaled else "❌ Not scaled"
+                st.write(f"**Data Status:** {cleaning_status} | {scaling_status}")
+                
+                # Select target and problem type
+                all_columns = df.columns.tolist()
+                target = st.selectbox(
+                    "Select target variable",
+                    all_columns
+                )
+                
+                # Determine problem type
+                if pd.api.types.is_numeric_dtype(df[target]):
+                    unique_values = df[target].nunique()
+                    if unique_values < 10 and unique_values > 0:
+                        problem_type = st.radio(
+                            "Problem type",
+                            ["classification", "regression"],
+                            index=0
+                        )
+                    else:
+                        problem_type = "regression"
+                else:
+                    problem_type = "classification"
+                
+                st.write(f"**Problem Type:** {problem_type.capitalize()}")
+                
+                # Train model
+                if st.checkbox("Show model training options"):
+                    trained_model = train_ml_model(df, target, problem_type)
+                
+                # Make predictions if model is trained
+                if st.session_state.get('model_trained', False):
+                    make_predictions()
+
 if __name__ == "__main__":
     main()
