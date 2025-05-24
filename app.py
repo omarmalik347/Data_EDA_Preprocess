@@ -3,18 +3,19 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-from sklearn.preprocessing import StandardScaler, MinMaxScaler, RobustScaler
-from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler, MinMaxScaler, RobustScaler, LabelEncoder
+from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.metrics import (accuracy_score, precision_score, recall_score, 
-                             f1_score, roc_auc_score, mean_squared_error, 
-                             r2_score, confusion_matrix, classification_report)
+                             f1_score, mean_squared_error, r2_score, 
+                             confusion_matrix, classification_report)
 from sklearn.linear_model import LogisticRegression, LinearRegression, Ridge, Lasso
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.svm import SVC, SVR
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
 from xgboost import XGBClassifier, XGBRegressor
-from sklearn.model_selection import GridSearchCV
+from sklearn.naive_bayes import GaussianNB
+from sklearn.neural_network import MLPClassifier, MLPRegressor
 import pickle
 import io
 import joblib
@@ -368,17 +369,41 @@ def plot_data(df, features, target):
         except Exception as e:
             st.error(f"Error creating plot: {e}")
 
-def train_ml_model(df, target, problem_type):
+def train_ml_model(df, target):
     """Train machine learning model based on user selections"""
     st.subheader("Machine Learning Model Training")
+    
+    # Determine problem type
+    if pd.api.types.is_numeric_dtype(df[target]):
+        unique_values = df[target].nunique()
+        if unique_values < 10 and unique_values > 0:
+            problem_type = st.radio(
+                "Problem type",
+                ["classification", "regression"],
+                index=0
+            )
+        else:
+            problem_type = "regression"
+    else:
+        problem_type = "classification"
+    
+    st.write(f"**Problem Type:** {problem_type.capitalize()}")
     
     # Separate features and target
     X = df.drop(columns=[target])
     y = df[target]
     
+    # Encode target if classification
+    label_encoder = None
+    if problem_type == "classification":
+        label_encoder = LabelEncoder()
+        y_encoded = label_encoder.fit_transform(y)
+    else:
+        y_encoded = y
+    
     # Train-test split
     test_size = st.slider("Test set size (%)", 10, 40, 20) / 100
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, random_state=42)
+    X_train, X_test, y_train, y_test = train_test_split(X, y_encoded, test_size=test_size, random_state=42)
     
     # Model selection
     model_options = {
@@ -388,24 +413,27 @@ def train_ml_model(df, target, problem_type):
             "SVM": SVC(),
             "Decision Tree": DecisionTreeClassifier(),
             "KNN": KNeighborsClassifier(),
-            "XGBoost": XGBClassifier()
+            "XGBoost": XGBClassifier(),
+            "Naive Bayes": GaussianNB(),
+            "Neural Network": MLPClassifier(max_iter=1000)
         },
         "regression": {
             "Linear Regression": LinearRegression(),
             "Random Forest": RandomForestRegressor(),
-            "SVM": SVR(),
+            "SVR": SVR(),
             "Decision Tree": DecisionTreeRegressor(),
             "KNN": KNeighborsRegressor(),
             "XGBoost": XGBRegressor(),
             "Ridge": Ridge(),
-            "Lasso": Lasso()
+            "Lasso": Lasso(),
+            "Neural Network": MLPRegressor(max_iter=1000)
         }
     }
     
     model_name = st.selectbox(
         f"Select {problem_type} model",
         list(model_options[problem_type].keys())
-    )
+    
     # Hyperparameter tuning
     st.markdown("### Hyperparameter Tuning (Optional)")
     if st.checkbox("Enable hyperparameter tuning", False):
@@ -441,17 +469,22 @@ def train_ml_model(df, target, problem_type):
     # Train model
     if st.button("Train Model"):
         with st.spinner(f"Training {model_name}..."):
-            model.fit(X_train, y_train)
+            # Scale features
+            scaler = StandardScaler()
+            X_train_scaled = scaler.fit_transform(X_train)
+            X_test_scaled = scaler.transform(X_test)
+            
+            model.fit(X_train_scaled, y_train)
             
             # Make predictions
-            y_pred = model.predict(X_test)
+            y_pred = model.predict(X_test_scaled)
             
             # Evaluate model
             st.subheader("Model Evaluation")
             
             if problem_type == "classification":
                 st.write("**Classification Report:**")
-                st.text(classification_report(y_test, y_pred))
+                st.text(classification_report(y_test, y_pred, target_names=label_encoder.classes_ if label_encoder else None))
                 
                 st.write("**Confusion Matrix:**")
                 cm = confusion_matrix(y_test, y_pred)
@@ -470,11 +503,13 @@ def train_ml_model(df, target, problem_type):
                 
             else:  # regression
                 st.write("**Regression Metrics:**")
-                col1, col2 = st.columns(2)
+                col1, col2, col3 = st.columns(3)
                 with col1:
                     st.metric("R² Score", f"{r2_score(y_test, y_pred):.2f}")
                 with col2:
                     st.metric("MSE", f"{mean_squared_error(y_test, y_pred):.2f}")
+                with col3:
+                    st.metric("MAE", f"{mean_absolute_error(y_test, y_pred):.2f}")
                 
                 # Plot actual vs predicted
                 fig, ax = plt.subplots()
@@ -484,16 +519,26 @@ def train_ml_model(df, target, problem_type):
                 ax.set_ylabel("Predicted")
                 st.pyplot(fig)
             
-            # Save model to session state
+            # Save model artifacts to session state
             st.session_state.trained_model = model
+            st.session_state.scaler = scaler
+            st.session_state.label_encoder = label_encoder
             st.session_state.model_trained = True
             st.session_state.feature_columns = X.columns.tolist()
             st.session_state.target_column = target
+            st.session_state.problem_type = problem_type
             
             # Model download
             st.subheader("Model Download")
             model_bytes = io.BytesIO()
-            joblib.dump(model, model_bytes)
+            joblib.dump({
+                'model': model,
+                'scaler': scaler,
+                'label_encoder': label_encoder,
+                'feature_columns': X.columns.tolist(),
+                'target_column': target,
+                'problem_type': problem_type
+            }, model_bytes)
             st.download_button(
                 label="Download Trained Model",
                 data=model_bytes.getvalue(),
@@ -509,7 +554,8 @@ def make_predictions():
     
     prediction_type = st.radio(
         "Prediction input method",
-        ["Use test file", "Manual input"]
+        ["Use test file", "Manual input"],
+        horizontal=True
     )
     
     if prediction_type == "Use test file":
@@ -531,7 +577,16 @@ def make_predictions():
                     st.error(f"Missing features in test data: {missing_features}")
                 else:
                     test_df = test_df[st.session_state.feature_columns]
-                    predictions = st.session_state.trained_model.predict(test_df)
+                    
+                    # Scale features
+                    test_scaled = st.session_state.scaler.transform(test_df)
+                    
+                    # Make predictions
+                    predictions = st.session_state.trained_model.predict(test_scaled)
+                    
+                    # Decode predictions if classification
+                    if st.session_state.label_encoder:
+                        predictions = st.session_state.label_encoder.inverse_transform(predictions)
                     
                     # Add predictions to test data
                     result_df = test_df.copy()
@@ -561,7 +616,17 @@ def make_predictions():
         
         if st.button("Predict"):
             input_df = pd.DataFrame(input_data)
-            prediction = st.session_state.trained_model.predict(input_df)
+            
+            # Scale features
+            input_scaled = st.session_state.scaler.transform(input_df)
+            
+            # Make prediction
+            prediction = st.session_state.trained_model.predict(input_scaled)
+            
+            # Decode prediction if classification
+            if st.session_state.label_encoder:
+                prediction = st.session_state.label_encoder.inverse_transform(prediction)
+            
             st.success(f"Predicted {st.session_state.target_column}: {prediction[0]}")
 
 def main():
@@ -688,32 +753,16 @@ def main():
                 scaling_status = "✅ Scaled" if st.session_state.data_scaled else "❌ Not scaled"
                 st.write(f"**Data Status:** {cleaning_status} | {scaling_status}")
                 
-                # Select target and problem type
+                # Select target
                 all_columns = df.columns.tolist()
                 target = st.selectbox(
                     "Select target variable",
                     all_columns
                 )
                 
-                # Determine problem type
-                if pd.api.types.is_numeric_dtype(df[target]):
-                    unique_values = df[target].nunique()
-                    if unique_values < 10 and unique_values > 0:
-                        problem_type = st.radio(
-                            "Problem type",
-                            ["classification", "regression"],
-                            index=0
-                        )
-                    else:
-                        problem_type = "regression"
-                else:
-                    problem_type = "classification"
-                
-                st.write(f"**Problem Type:** {problem_type.capitalize()}")
-                
                 # Train model
                 if st.checkbox("Show model training options"):
-                    trained_model = train_ml_model(df, target, problem_type)
+                    trained_model = train_ml_model(df, target)
                 
                 # Make predictions if model is trained
                 if st.session_state.get('model_trained', False):
